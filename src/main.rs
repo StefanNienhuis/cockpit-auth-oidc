@@ -3,11 +3,9 @@ mod oidc;
 
 use std::fmt::{Display};
 use std::path::{PathBuf};
-use rand::{distributions::DistString};
+use rand::distr::SampleString;
 use protocol::AuthChallengeCommand;
 use crate::protocol::{AuthResponseCommand, Command, Problem, ProblemCommand};
-
-static COCKPIT_SSH_COMMAND: &'static str = "/usr/libexec/cockpit-ssh";
 
 fn main() -> Result<(), ()> {
     let mut args = std::env::args();
@@ -30,7 +28,7 @@ fn main() -> Result<(), ()> {
 
     eprintln!("Performing OIDC authentication for host '{}'", host);
 
-    let cookie = rand::distributions::Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    let cookie = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 16);
 
     match AuthChallengeCommand::new("*".to_string(), cookie.to_string()).send() {
         Ok(_) => {},
@@ -93,10 +91,19 @@ fn main() -> Result<(), ()> {
     eprintln!("Using SSH key: {}", user_key_path.to_string_lossy().to_string());
 
     match std::process::Command::new("ssh-add")
-        .arg("-t 30")
+        .arg("-t")
+        .arg("30")
         .arg(user_key_path.into_os_string())
         .output() {
-        Ok(output) => { eprintln!("ssh-add {}", output.status) },
+        Ok(output) => {
+            eprintln!("ssh-add {}", output.status);
+            if !output.status.success() {
+                match String::from_utf8(output.stderr) {
+                    Ok(string) => eprintln!("{}", string),
+                    Err(err) => eprintln!("Non UTF-8 stderr: {}", err)
+                }
+            }
+        },
         Err(err) => {
             internal_problem("Error while adding SSH key", err);
         }
@@ -115,7 +122,12 @@ fn main() -> Result<(), ()> {
         connection_string = format!("{}@{}", username, host);
     }
 
-    let err = exec::execvp(COCKPIT_SSH_COMMAND, &[COCKPIT_SSH_COMMAND, &connection_string]);
+    let err = exec::execvp("python3", &[
+        "python3",
+        "-m",
+        "cockpit.beiboot",
+        &connection_string
+    ]);
     internal_problem("SSH exited with error", err);
 
     Ok(())

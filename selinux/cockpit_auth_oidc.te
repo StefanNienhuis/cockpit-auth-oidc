@@ -1,0 +1,24 @@
+
+module cockpit_auth_oidc 1.0;
+
+require {
+    type cockpit_ws_t;
+    type http_port_t;
+    class tcp_socket name_connect;
+
+	type ssh_agent_exec_t;
+	type init_t;
+	class file { execute execute_no_trans map open read };
+
+    type var_run_t;
+    class sock_file { getattr open read write };
+}
+
+# Allow Cockpit to access HTTP
+allow cockpit_ws_t http_port_t:tcp_socket name_connect;
+
+# Allow init system access to run SSH agent
+allow init_t ssh_agent_exec_t:file { execute execute_no_trans map open read };
+
+# Allow Cockpit to access SSH agent socket - a bit overly permissive
+allow cockpit_ws_t var_run_t:sock_file { getattr open read write };

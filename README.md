@@ -10,6 +10,8 @@ Note: while this project is not inherently insecure, you should review the sourc
 
 ## Cockpit configuration
 
+Place the downloaded binary from Releases at `/etc/cockpit/cockpit-auth-oidc/cockpit-auth-oidc`.
+
 Cockpit has some undocumented configuration options related to OAuth2.
 When configured, the Cockpit login page will redirect to the configured URL, appending the login page as a redirect URL.
 An example configuration is shown below.
@@ -17,14 +19,14 @@ An example configuration is shown below.
 `/etc/cockpit/cockpit.conf`
 ```
 [OAuth]
-URL = <OIDC_HOST>/auth?response_type=code&client_id=<CLIENT_ID>&scope=openid&nonce=unused
+URL = <OIDC login URL, e.g. http://localhost:8080/realms/default/protocol/openid-connect/auth?response_type=code&client_id=cockpit&scope=openid&nonce=unused>
 TokenParam = code
 
 [Bearer]
 Action = remote-login-ssh
 
 [SSH-Login]
-Command = /etc/cockpit/cockpit-auth-oidc
+Command = /etc/cockpit/cockpit-auth-oidc/cockpit-auth-oidc
 ```
 
 Optionally, you can include `ConnectToUnknownHosts = true` under the `SSH-Login` section to allow connecting to unknown hosts.
@@ -33,44 +35,73 @@ Otherwise, you need to add every host to `/etc/ssh/ssh_known_hosts`
 ## SSH keys
 
 The authentication happens with SSH keys. A directory is configured that contains an SSH private key for each user that uses the application.
-The file name of each private key should be the user `preferred_username`. These private keys unfortunately have to be without a password, since there is no easy secure method of unlocking them.
+The file name of each private key should be the user `preferred_username`.
+These private keys unfortunately have to be without a password, since there is no easy secure method of unlocking them.
 
-Such a key can be generated using the `ssh-keygen` command. Make sure no password is provided.
+For example, create and enter the standard location for the SSH keys.
+```shell
+mkdir /etc/cockpit/cockpit-auth-oidc/ssh-keys
+cd /etc/cockpit/cockpit-auth-oidc/ssh-keys
+```
+
+Generate a key using the `ssh-keygen` command. Make sure no password is provided.
 ```
 ssh-keygen -t ed25519 -C '<username>@cockpit' -f '<username>'
 ```
 
-These keys should be owned by the user that runs Cockpit (`cockpit-wsinstance` on Fedora and other RHEL-based systems).
+These keys should be owned by the user that runs Cockpit (e.g. `cockpit-wsinstance-https` on Fedora and other RHEL-based systems).
 
 ## Environment variables
 
-In addition to the Cockpit configuration, some environment variables are needed for the custom authentication binary.
+In addition to the Cockpit configuration, some customizations to the Cockpit service are needed. The following environment variables are to be set:
 
-| Key                        | Value                                                                                        |
-|----------------------------|----------------------------------------------------------------------------------------------|
-| COCKPIT_OIDC_CLIENT_ID     | The OIDC client ID.                                                                          |
-| COCKPIT_OIDC_CLIENT_SECRET | The OIDC client secret.                                                                      |
-| COCKPIT_OIDC_ISSUER_URL    | The OIDC issuer URL. Must be accessible from the user and from Cockpit backend.              |
-| COCKPIT_OIDC_LOGIN_URL     | The Cockpit login base URL. This is required for building the redirect URL.                  |
-| COCKPIT_OIDC_SSH_KEYS_PATH | The directory containing the user SSH private keys.                                          |
-| SSH_AUTH_SOCK              | *Optional* SSH auth socket location. See [Fedora/RHEL](#fedora-and-rhel-based-distributions) |
+| Key                        | Value                                                                             |
+|----------------------------|-----------------------------------------------------------------------------------|
+| COCKPIT_OIDC_CLIENT_ID     | The OIDC client ID.                                                               |
+| COCKPIT_OIDC_CLIENT_SECRET | The OIDC client secret.                                                           |
+| COCKPIT_OIDC_ISSUER_URL    | The OIDC issuer URL. Must be accessible from the user and from Cockpit backend.   |
+| COCKPIT_OIDC_LOGIN_URL     | The Cockpit login base URL. This is required for building the redirect URL.       |
+| COCKPIT_OIDC_SSH_KEYS_PATH | The directory containing the user SSH private keys.                               |
+| SSH_AUTH_SOCK              | SSH auth socket location. See [Fedora/RHEL](#fedora-and-rhel-based-distributions) |
 
-In case there are authentication failures, enabling `G_MESSAGES_DEBUG=all` will give some detailed logs from Cockpit and this binary.
+In addition, an ssh-agent is started for the process, by wrapping the normal ExecStart command in an `ssh-agent` call.
 
-For Cockpit on Fedora or other RHEL-based distributions, these configuration options can be set in a Systemd override.
+The service for which you should configure this, depends on whether you're using HTTP or HTTPS. By default, HTTPS is used.
+If HTTP is used, replace the `cockpit-wsinstance-https` with `cockpit-wsinstance-http` in the path below.
 
-Create the file (and directory if it does not exist) `/usr/lib/systemd/system/cockpit-wsinstance-http.service.d/cockpit-oidc.conf`.
+*Important:* Check the `ExecStart` command after `/usr/bin/ssh-agent -a /run/cockpit-auth-oidc/ssh-auth.sock` matches what is currently in the service.
+
+Create the file (and directory if it does not exist) `/usr/lib/systemd/system/cockpit-wsinstance-https.service.d/cockpit-auth-oidc.conf`.
 ```
 [Service]
-Environment=COCKPIT_OIDC_CLIENT_ID=
-Environment=COCKPIT_OIDC_CLIENT_SECRET=
-Environment=COCKPIT_OIDC_ISSUER_URL=
-Environment=COCKPIT_OIDC_LOGIN_URL=
-Environment=COCKPIT_OIDC_SSH_KEYS_PATH=
-Environment=SSH_AUTH_SOCK=
+RuntimeDirectory=cockpit-auth-oidc
+ExecStart=
+ExecStart=/usr/bin/ssh-agent -a /run/cockpit-auth-oidc/ssh-auth.sock /usr/libexec/cockpit-ws --for-tls-proxy --port=0
+Environment=SSH_AUTH_SOCK=/run/cockpit-auth-oidc/ssh-auth.sock
+
+Environment=COCKPIT_OIDC_CLIENT_ID=cockpit
+Environment=COCKPIT_OIDC_CLIENT_SECRET=<secret>
+Environment=COCKPIT_OIDC_ISSUER_URL=<e.g. http://localhost:8080/realms/default>
+Environment=COCKPIT_OIDC_LOGIN_URL=<e.g. http://localhost:9090/>
+Environment=COCKPIT_OIDC_SSH_KEYS_PATH=/etc/cockpit/cockpit-auth-oidc/ssh-keys
+
+Environment=G_MESSAGES_DEBUG=all
 ```
 
-## Deployment
+In case there are authentication failures, setting the `G_MESSAGES_DEBUG=all` environment variable will give some detailed logs from Cockpit and this binary.
+
+## SELinux
+
+When using SELinux, a policy file needs to be applied, see [cockpit_auth_oidc.te](selinux/cockpit_auth_oidc.te).
+
+The policy can be applied by downloading the compiled `cockpit-auth-oidc.pp` file from Releases and running:
+```shell`
+semodule -i cockpit_auth_oidc.pp
+```
+
+It can also be manually compiled and installed, when `selinux-policy-devel` is installed, using `selinux/install.sh`.
+
+## Notes
 
 ### Fedora and RHEL-based distributions
 
@@ -79,25 +110,9 @@ This is caused by the fact that there is no `ssh-agent` running for the user tha
 `ssh-agent` is pre-installed software that keeps a set of SSH private keys that can be added using `ssh-add` for a set amount of time.
 This binary calls `ssh-add` with the user private key and `ssh-agent` keeps the private key for 30 seconds while Cockpit establishes the connection.
 
-Running `ssh-agent` for the Cockpit user can easily be done with a Systemd service.
-
-Create a Systemd service in a location such as `/usr/lib/systemd/system/cockpit-ssh-agent.service`. 
-```
-[Unit]
-Description=Cockpit SSH agent
-
-[Service]
-Environment=SSH_AUTH_SOCK=/etc/cockpit/ssh-auth.socket
-ExecStart=/usr/bin/ssh-agent -D -a $SSH_AUTH_SOCK
-User=cockpit-wsinstance
-Group=cockpit-wsinstance
-```
-
-The SSH_AUTH_SOCK environment variable (`/etc/cockpit/ssh-auth.socket` above) should also be provided to Cockpit.
-
 ### Other Linux distributions
 
-For other Linux distributions, it will either work out of the box or require a similar solution to Fedora/RHEL. This is not tested.
+Other Linux distributions are not tested.
 
 ### Docker
 
