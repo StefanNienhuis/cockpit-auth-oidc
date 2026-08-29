@@ -95,7 +95,7 @@ In case there are authentication failures, setting the `G_MESSAGES_DEBUG=all` en
 When using SELinux, a policy file needs to be applied, see [cockpit_auth_oidc.te](selinux/cockpit_auth_oidc.te).
 
 The policy can be applied by downloading the compiled `cockpit-auth-oidc.pp` file from Releases and running:
-```shell`
+```shell
 semodule -i cockpit_auth_oidc.pp
 ```
 
