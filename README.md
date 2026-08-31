@@ -67,11 +67,11 @@ In addition to the Cockpit configuration, some customizations to the Cockpit ser
 In addition, an ssh-agent is started for the process, by wrapping the normal ExecStart command in an `ssh-agent` call.
 
 The service for which you should configure this, depends on whether you're using HTTP or HTTPS. By default, HTTPS is used.
-If HTTP is used, replace the `cockpit-wsinstance-https` with `cockpit-wsinstance-http` in the path below.
+If HTTP is used, replace the `cockpit-wsinstance-https@.service` with `cockpit-wsinstance-http.service` in the path below.
 
 *Important:* Check the `ExecStart` command after `/usr/bin/ssh-agent -a /run/cockpit-auth-oidc/ssh-auth.sock` matches what is currently in the service.
 
-Create the file (and directory if it does not exist) `/usr/lib/systemd/system/cockpit-wsinstance-https.service.d/cockpit-auth-oidc.conf`.
+Create the file (and directory if it does not exist) `/usr/lib/systemd/system/cockpit-wsinstance-https@.service.d/cockpit-auth-oidc.conf`.
 ```
 [Service]
 RuntimeDirectory=cockpit-auth-oidc
